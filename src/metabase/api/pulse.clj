@@ -3,6 +3,7 @@
   (:require [compojure.core :refer [DELETE GET POST PUT]]
             [hiccup.core :refer [html]]
             [metabase
+             [driver :as driver]
              [email :as email]
              [events :as events]
              [pulse :as p]
@@ -19,7 +20,8 @@
             [metabase.util.schema :as su]
             [schema.core :as s]
             [toucan.db :as db])
-  (:import java.io.ByteArrayInputStream))
+  (:import java.io.ByteArrayInputStream
+           java.util.TimeZone))
 
 (api/defendpoint GET "/"
   "Fetch all `Pulses`"
@@ -100,6 +102,11 @@
                    (catch Throwable e
                      (assoc-in chan-types [:slack :error] (.getMessage e)))))}))
 
+(defn- defaulted-timezone [card]
+  (TimeZone/getTimeZone
+   (or (-> card :database-id driver/database-id->driver driver/report-timezone-if-supported)
+       (System/getProperty "user.timezone"))))
+
 (api/defendpoint GET "/preview_card/:id"
   "Get HTML rendering of a `Card` with ID."
   [id]
@@ -107,7 +114,7 @@
         result (qp/process-query-and-save-execution! (:dataset_query card) {:executed-by api/*current-user-id*, :context :pulse, :card-id id})]
     {:status 200, :body (html [:html [:body {:style "margin: 0;"} (binding [render/*include-title* true
                                                                             render/*include-buttons* true]
-                                                                    (render/render-pulse-card card result))]])}))
+                                                                    (render/render-pulse-card (defaulted-timezone card) card result))]])}))
 
 (api/defendpoint GET "/preview_card_info/:id"
   "Get JSON object containing HTML rendering of a `Card` with ID and other information."
@@ -117,7 +124,7 @@
         data      (:data result)
         card-type (render/detect-pulse-card-type card data)
         card-html (html (binding [render/*include-title* true]
-                          (render/render-pulse-card card result)))]
+                              (render/render-pulse-card (defaulted-timezone card) card result)))]
     {:id              id
      :pulse_card_type card-type
      :pulse_card_html card-html
@@ -129,7 +136,7 @@
   (let [card   (api/read-check Card id)
         result (qp/process-query-and-save-execution! (:dataset_query card) {:executed-by api/*current-user-id*, :context :pulse, :card-id id})
         ba     (binding [render/*include-title* true]
-                 (render/render-pulse-card-to-png card result))]
+                 (render/render-pulse-card-to-png (defaulted-timezone card) card result))]
     {:status 200, :headers {"Content-Type" "image/png"}, :body (ByteArrayInputStream. ba)}))
 
 (api/defendpoint POST "/test"
